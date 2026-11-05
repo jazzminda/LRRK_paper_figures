@@ -1,0 +1,332 @@
+---
+title: "ClusterProfiler Figure"
+author: "Jasmin Jansen"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## Analyse GO annotation enrichment of hierarchical clustering
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ggplot2)
+```
+
+1.  Load Data
+
+```{r}
+gene_column <- "PG.Genes"
+cluster_column <- "Cluster"
+
+Int <- read.delim("Int_inclTtests_forPython.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+Int <- Int[-c(1, 2), ]
+
+Cluster <- read.delim("Int_clusterResults_forPathway.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+Cluster <- Cluster[-1, ]
+
+kegg_organism <- "hsa"
+```
+
+2.  Background
+
+```{r}
+background_symbols <- Int %>%
+  dplyr::select(dplyr::all_of(gene_column)) %>%
+  tidyr::separate_rows(
+    dplyr::all_of(gene_column),
+    sep = ";"
+  ) %>%
+  dplyr::pull(dplyr::all_of(gene_column)) %>%
+  as.character() %>%
+  trimws() %>%
+  na.omit() %>%
+  unique()
+
+background_mapping <- clusterProfiler::bitr(
+  background_symbols,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db,
+  drop = TRUE
+)
+
+background_entrez <- unique(background_mapping$ENTREZID)
+```
+
+```{r}
+cluster_long <- Cluster %>%
+  dplyr::select(
+    dplyr::all_of(cluster_column),
+    dplyr::all_of(gene_column)
+  ) %>%
+  tidyr::separate_rows(
+    dplyr::all_of(gene_column),
+    sep = ";"
+  ) %>%
+  dplyr::mutate(
+    gene_symbol = trimws(
+      as.character(.data[[gene_column]])
+    )
+  ) %>%
+  dplyr::filter(
+    !is.na(gene_symbol),
+    gene_symbol != ""
+  ) %>%
+  dplyr::distinct(
+    .data[[cluster_column]],
+    gene_symbol
+  )
+```
+
+```{r}
+cluster_long %>%
+  dplyr::count(
+    .data[[cluster_column]],
+    name = "number_of_genes"
+  )
+```
+
+```{r}
+cluster_gene_mapping <- clusterProfiler::bitr(
+  unique(cluster_long$gene_symbol),
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db,
+  drop = TRUE
+)
+
+cluster_entrez_table <- cluster_long %>%
+  dplyr::left_join(
+    cluster_gene_mapping,
+    by = c("gene_symbol" = "SYMBOL")
+  ) %>%
+  dplyr::filter(!is.na(ENTREZID)) %>%
+  dplyr::filter(ENTREZID %in% background_entrez) %>%
+  dplyr::distinct(
+    .data[[cluster_column]],
+    ENTREZID
+  )
+```
+
+```{r}
+cluster_entrez_table %>%
+  dplyr::count(
+    .data[[cluster_column]],
+    name = "mapped_entrez_ids"
+  )
+```
+
+```{r}
+cluster_gene_lists <- split(
+  cluster_entrez_table$ENTREZID,
+  cluster_entrez_table[[cluster_column]]
+)
+
+cluster_gene_lists <- lapply(
+  cluster_gene_lists,
+  unique
+)
+```
+
+```{r}
+go_bp_compare <- clusterProfiler::compareCluster(
+  geneCluster   = cluster_gene_lists,
+  fun           = "enrichGO",
+  OrgDb         = org.Hs.eg.db,
+  keyType       = "ENTREZID",
+  ont           = "BP",
+  universe      = background_entrez,
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.20,
+  minGSSize     = 10,
+  maxGSSize     = 500,
+  readable      = TRUE
+)
+```
+
+```{r}
+go_cc_compare <- clusterProfiler::compareCluster(
+  geneCluster   = cluster_gene_lists,
+  fun           = "enrichGO",
+  OrgDb         = org.Hs.eg.db,
+  keyType       = "ENTREZID",
+  ont           = "CC",
+  universe      = background_entrez,
+  pAdjustMethod = "BH",
+  pvalueCutoff  = 0.05,
+  qvalueCutoff  = 0.20,
+  minGSSize     = 10,
+  maxGSSize     = 500,
+  readable      = TRUE
+)
+```
+
+```{r}
+go_bp_plot_data <- as.data.frame(go_bp_compare)
+
+go_bp_plot_data <- go_bp_plot_data %>%
+  dplyr::filter(p.adjust < 0.05)
+
+go_bp_selected_terms <- go_bp_plot_data %>%
+  dplyr::group_by(Cluster) %>%
+  dplyr::slice_min(
+    order_by = p.adjust,
+    n = 10,
+    with_ties = FALSE
+  ) %>%
+  dplyr::pull(Description) %>%
+  unique()
+
+go_bp_plot_data_selected <- go_bp_plot_data %>%
+  dplyr::filter(Description %in% go_bp_selected_terms)
+
+go_bp_plot_data_selected <- go_bp_plot_data_selected %>%
+  dplyr::mutate(
+    negLog10Padj = -log10(p.adjust)
+  )
+
+go_bp_plot_data_selected$Cluster <- factor(
+  go_bp_plot_data_selected$Cluster,
+  levels = c(
+    "Cluster -1390",
+    "Cluster -1388",
+    "Cluster -1382",
+    "Cluster -1386",
+    "Cluster -1374"
+  )
+)
+```
+
+```{r}
+library(viridis)
+
+go_bp_cluster_dotplot <- ggplot2::ggplot(
+  go_bp_plot_data_selected,
+  ggplot2::aes(
+    x = Cluster,
+    y = Description,
+    size = Count,
+    color = negLog10Padj
+  )
+) +
+  ggplot2::geom_point() +
+  ggplot2::scale_color_viridis_c(
+    option = "plasma",
+    name = expression(-log[10]("adj. p"))
+  ) +
+  ggplot2::labs(
+    title = "GO Biological Process enrichment",
+    x = "Cluster",
+    y = NULL,
+    size = "Protein count",
+    color = "Adjusted p-value"
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    axis.text.x = ggplot2::element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    axis.text.y = ggplot2::element_text(size = 9)
+  )
+
+go_bp_cluster_dotplot
+```
+
+```{r}
+go_cc_plot_data <- as.data.frame(go_cc_compare)
+
+go_cc_plot_data <- go_cc_plot_data %>%
+  dplyr::filter(p.adjust < 0.05)
+
+go_cc_selected_terms <- go_cc_plot_data %>%
+  dplyr::group_by(Cluster) %>%
+  dplyr::slice_min(
+    order_by = p.adjust,
+    n = 10,
+    with_ties = FALSE
+  ) %>%
+  dplyr::pull(Description) %>%
+  unique()
+
+go_cc_plot_data_selected <- go_cc_plot_data %>%
+  dplyr::filter(Description %in% go_cc_selected_terms)
+
+go_cc_plot_data_selected <- go_cc_plot_data_selected %>%
+  dplyr::mutate(
+    negLog10Padj = -log10(p.adjust)
+  )
+
+go_cc_plot_data_selected$Cluster <- factor(
+  go_cc_plot_data_selected$Cluster,
+  levels = c(
+    "Cluster -1390",
+    "Cluster -1388",
+    "Cluster -1382",
+    "Cluster -1386",
+    "Cluster -1374"
+  )
+)
+```
+
+```{r}
+go_cc_cluster_dotplot <- ggplot2::ggplot(
+  go_cc_plot_data_selected,
+  ggplot2::aes(
+    x = Cluster,
+    y = Description,
+    size = Count,
+    color = negLog10Padj
+  )
+) +
+  ggplot2::geom_point() +
+  viridis::scale_color_viridis(
+    option = "magma",
+    name = expression(-log[10]("adj. p"))
+  ) +
+  ggplot2::labs(
+    title = "GO Cellular Component enrichment",
+    x = "Cluster",
+    y = NULL,
+    size = "Protein count"
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold"),
+    axis.text.x = ggplot2::element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    axis.text.y = ggplot2::element_text(size = 9)
+  )
+
+go_cc_cluster_dotplot
+```
+
+```{r}
+library(svglite)
+
+ggsave(
+  filename = "GO_BP_cluster_dotplot.svg",
+  plot = go_bp_cluster_dotplot,
+  width = 9,
+  height = 7,
+  units = "in"
+)
+
+ggsave(
+  filename = "GO_CC_cluster_dotplot.svg",
+  plot = go_cc_cluster_dotplot,
+  width = 9,
+  height = 7,
+  units = "in"
+)
+```
