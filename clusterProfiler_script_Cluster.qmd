@@ -24,7 +24,7 @@ library(ggplot2)
 gene_column <- "PG.Genes"
 cluster_column <- "Cluster"
 
-Int <- read.delim("Int_inclTtests_forPython.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+Int <- read.delim("Int_inclTtests_forPython_revision_m741.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
 Int <- Int[-c(1, 2), ]
 
 Cluster <- read.delim("Int_clusterResults_forPathway.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
