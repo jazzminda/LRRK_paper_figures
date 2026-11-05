@@ -24,10 +24,10 @@ library(ggplot2)
 gene_column <- "PG.Genes"
 cluster_column <- "Cluster"
 
-Int <- read.delim("Int_inclTtests_forPython_revision_m741.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+Int <- read.delim("Int_inclTtests_m741.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
 Int <- Int[-c(1, 2), ]
 
-Cluster <- read.delim("Int_clusterResults_forPathway.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+Cluster <- read.delim("Int_clusterResults_forPathway_m419.txt",sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
 Cluster <- Cluster[-1, ]
 
 kegg_organism <- "hsa"
